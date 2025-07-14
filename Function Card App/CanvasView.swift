@@ -42,6 +42,7 @@ struct CanvasView: View {
     private let scaleStep: CGFloat = 0.25
     private let minScale: CGFloat = 0.25
     private let maxScale: CGFloat = 3.0
+    private let gridSize: CGFloat = 30
     
     // 現在のページを取得
     private var currentPage: Page? {
@@ -362,6 +363,13 @@ struct CanvasView: View {
         }
     }
     
+    // Grid snapping helper function
+    private func snapToGrid(_ point: CGPoint) -> CGPoint {
+        let snappedX = round(point.x / gridSize) * gridSize
+        let snappedY = round(point.y / gridSize) * gridSize
+        return CGPoint(x: snappedX, y: snappedY)
+    }
+    
     private func toggleSelectionMode() {
         isSelectionMode.toggle()
         if !isSelectionMode {
@@ -428,8 +436,11 @@ struct CanvasView: View {
         // WrapperBlocksのポジション更新
         for i in updatedPage.wrapperBlocks.indices {
             if selectedWrapperBlocks.contains(updatedPage.wrapperBlocks[i].id) {
-                updatedPage.wrapperBlocks[i].position.x += updatedPage.wrapperBlocks[i].offset.width
-                updatedPage.wrapperBlocks[i].position.y += updatedPage.wrapperBlocks[i].offset.height
+                let newPosition = CGPoint(
+                    x: updatedPage.wrapperBlocks[i].position.x + updatedPage.wrapperBlocks[i].offset.width,
+                    y: updatedPage.wrapperBlocks[i].position.y + updatedPage.wrapperBlocks[i].offset.height
+                )
+                updatedPage.wrapperBlocks[i].position = snapToGrid(newPosition)
                 updatedPage.wrapperBlocks[i].offset = .zero
             }
         }
@@ -437,8 +448,11 @@ struct CanvasView: View {
         // WrappedBlocksのポジション更新
         for i in updatedPage.wrappedBlocks.indices {
             if selectedWrappedBlocks.contains(updatedPage.wrappedBlocks[i].id) {
-                updatedPage.wrappedBlocks[i].position.x += updatedPage.wrappedBlocks[i].offset.width
-                updatedPage.wrappedBlocks[i].position.y += updatedPage.wrappedBlocks[i].offset.height
+                let newPosition = CGPoint(
+                    x: updatedPage.wrappedBlocks[i].position.x + updatedPage.wrappedBlocks[i].offset.width,
+                    y: updatedPage.wrappedBlocks[i].position.y + updatedPage.wrappedBlocks[i].offset.height
+                )
+                updatedPage.wrappedBlocks[i].position = snapToGrid(newPosition)
                 updatedPage.wrappedBlocks[i].offset = .zero
             }
         }
@@ -652,8 +666,12 @@ struct CanvasView: View {
                         guard let pageId = selectedPageId,
                               let pageIndex = dataManager.pages.firstIndex(where: { $0.id == pageId }),
                               index < dataManager.pages[pageIndex].wrapperBlocks.count else { return }
-                        dataManager.pages[pageIndex].wrapperBlocks[index].position.x += value.translation.width
-                        dataManager.pages[pageIndex].wrapperBlocks[index].position.y += value.translation.height
+                        let newPosition = CGPoint(
+                            x: dataManager.pages[pageIndex].wrapperBlocks[index].position.x + value.translation.width,
+                            y: dataManager.pages[pageIndex].wrapperBlocks[index].position.y + value.translation.height
+                        )
+                        let snappedPosition = snapToGrid(newPosition)
+                        dataManager.pages[pageIndex].wrapperBlocks[index].position = snappedPosition
                         dataManager.pages[pageIndex].wrapperBlocks[index].offset = .zero
                         dataManager.saveData()
                     }
@@ -768,8 +786,9 @@ struct CanvasView: View {
                             page.wrapperBlocks[targetIndex].wrappedBlocks.append(newBlock)
                             page.wrappedBlocks.remove(at: index)
                         } else {
-                            // 位置更新
-                            page.wrappedBlocks[index].position = value.location
+                            // 位置更新 - apply grid snapping
+                            let snappedPosition = snapToGrid(value.location)
+                            page.wrappedBlocks[index].position = snappedPosition
                             page.wrappedBlocks[index].offset = .zero
                         }
                         dataManager.pages[pageIndex] = page
@@ -863,7 +882,7 @@ struct CanvasView: View {
                                 if let idx = wrappedBlocks.firstIndex(where: { $0.id == content.id }) {
                                     let removed = wrappedBlocks.remove(at: idx)
                                     var newBlock = removed
-                                    newBlock.position = droppedPosition
+                                    newBlock.position = snapToGrid(droppedPosition)
                                     contents.append(newBlock)
                                 }
                             }
