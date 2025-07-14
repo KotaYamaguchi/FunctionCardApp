@@ -9,7 +9,7 @@ import SwiftUI
 
 struct BlockManagementView: View {
     @ObservedObject private var dataManager = DataManager.shared
-    @State private var selectedPage: CanvasView.CanvasPage = .mechanism
+    @State private var selectedPageId: UUID?
     @State private var selectedBlockType: BlockType = .wrapper
     @State private var showingDeleteAlert = false
     @State private var blockToDelete: (id: UUID, type: BlockType)? = nil
@@ -32,17 +32,56 @@ struct BlockManagementView: View {
         var position: CGPoint
     }
     
+    // 現在選択されているページ
+    private var selectedPage: Page? {
+        guard let selectedPageId = selectedPageId else { return nil }
+        return dataManager.pages.first { $0.id == selectedPageId }
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
             // ヘッダー
             VStack(spacing: 16) {
                 // ページ選択
-                Picker("ページ選択", selection: $selectedPage) {
-                    ForEach(CanvasView.CanvasPage.allCases, id: \.self) {
-                        Text($0.rawValue)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("ページ選択")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    if dataManager.pages.isEmpty {
+                        HStack {
+                            Text("ページがありません")
+                                .foregroundColor(.gray)
+                            Spacer()
+                        }
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.gray, lineWidth: 1)
+                        )
+                    } else {
+                        Menu {
+                            ForEach(dataManager.pages, id: \.id) { page in
+                                Button(page.name) {
+                                    selectedPageId = page.id
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Text(selectedPage?.name ?? "ページを選択")
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                Image(systemName: "chevron.down")
+                                    .foregroundColor(.primary)
+                            }
+                            .padding()
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.primary, lineWidth: 1)
+                            )
+                        }
                     }
                 }
-                .pickerStyle(SegmentedPickerStyle())
                 
                 // ブロックタイプ選択
                 Picker("ブロックタイプ選択", selection: $selectedBlockType) {
@@ -89,10 +128,32 @@ struct BlockManagementView: View {
             .background(Color(.systemGray6))
             
             // ブロック一覧
-            if selectedBlockType == .wrapper {
-                wrapperBlocksList
+            if selectedPageId == nil {
+                // ページが選択されていない場合
+                VStack(spacing: 16) {
+                    Spacer()
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 48))
+                        .foregroundColor(.gray)
+                    Text("ページを選択してください")
+                        .font(.headline)
+                        .foregroundColor(.gray)
+                    
+                    if !dataManager.pages.isEmpty {
+                        Button("最初のページを選択") {
+                            selectedPageId = dataManager.pages.first?.id
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                wrappedBlocksList
+                if selectedBlockType == .wrapper {
+                    wrapperBlocksList
+                } else {
+                    wrappedBlocksList
+                }
             }
         }
         .navigationTitle("ブロック管理")
@@ -108,6 +169,12 @@ struct BlockManagementView: View {
         .sheet(item: $editingBlock) { editing in
             BlockEditView(editingBlock: editing) { updatedBlock in
                 updateBlock(updatedBlock)
+            }
+        }
+        .onAppear {
+            // 初期ページ選択
+            if selectedPageId == nil && !dataManager.pages.isEmpty {
+                selectedPageId = dataManager.pages.first?.id
             }
         }
     }
@@ -132,7 +199,8 @@ struct BlockManagementView: View {
                     // スワイプで削除
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
-                            dataManager.deleteWrapperBlock(id: block.id, from: selectedPage)
+                            guard let pageId = selectedPageId else { return }
+                            dataManager.deleteWrapperBlock(id: block.id, from: pageId)
                         } label: {
                             Label("削除", systemImage: "trash")
                         }
@@ -163,7 +231,8 @@ struct BlockManagementView: View {
                     // スワイプで削除
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
-                            dataManager.deleteWrappedBlock(id: block.id, from: selectedPage)
+                            guard let pageId = selectedPageId else { return }
+                            dataManager.deleteWrappedBlock(id: block.id, from: pageId)
                         } label: {
                             Label("削除", systemImage: "trash")
                         }
@@ -176,7 +245,8 @@ struct BlockManagementView: View {
     
     // MARK: - フィルタリング
     private var filteredWrapperBlocks: [WrapperBlock] {
-        let blocks = selectedPage == .mechanism ? dataManager.mechanismBlocks : dataManager.appearanceBlocks
+        guard let page = selectedPage else { return [] }
+        let blocks = page.wrapperBlocks
         return blocks.filter { block in
             let matchesSearch = searchText.isEmpty ||
                                block.text.localizedCaseInsensitiveContains(searchText) ||
@@ -187,7 +257,8 @@ struct BlockManagementView: View {
     }
     
     private var filteredWrappedBlocks: [WrappedBlock] {
-        let blocks = selectedPage == .mechanism ? dataManager.mechanismContents : dataManager.appearanceContents
+        guard let page = selectedPage else { return [] }
+        let blocks = page.wrappedBlocks
         return blocks.filter { block in
             let matchesSearch = searchText.isEmpty ||
                                block.text.localizedCaseInsensitiveContains(searchText) ||
@@ -226,39 +297,42 @@ struct BlockManagementView: View {
     }
     
     private func deleteBlock() {
-        guard let blockToDelete = blockToDelete else { return }
+        guard let blockToDelete = blockToDelete,
+              let pageId = selectedPageId else { return }
         
         if blockToDelete.type == .wrapper {
-            dataManager.deleteWrapperBlock(id: blockToDelete.id, from: selectedPage)
+            dataManager.deleteWrapperBlock(id: blockToDelete.id, from: pageId)
         } else {
-            dataManager.deleteWrappedBlock(id: blockToDelete.id, from: selectedPage)
+            dataManager.deleteWrappedBlock(id: blockToDelete.id, from: pageId)
         }
         
         self.blockToDelete = nil
     }
     
     private func updateBlock(_ editingBlock: EditingBlock) {
+        guard let pageId = selectedPageId else { return }
+        
         if editingBlock.type == .wrapper {
-            let blocks = selectedPage == .mechanism ? dataManager.mechanismBlocks : dataManager.appearanceBlocks
-            if let index = blocks.firstIndex(where: { $0.id == editingBlock.blockId }) {
-                var updatedBlock = blocks[index]
+            if let page = selectedPage,
+               let index = page.wrapperBlocks.firstIndex(where: { $0.id == editingBlock.blockId }) {
+                var updatedBlock = page.wrapperBlocks[index]
                 updatedBlock.text = editingBlock.text
                 updatedBlock.backText = editingBlock.backText
                 updatedBlock.group = editingBlock.group
                 updatedBlock.color = editingBlock.group.color
                 updatedBlock.position = editingBlock.position
-                dataManager.updateWrapperBlock(updatedBlock, in: selectedPage)
+                dataManager.updateWrapperBlock(updatedBlock, in: pageId)
             }
         } else {
-            let blocks = selectedPage == .mechanism ? dataManager.mechanismContents : dataManager.appearanceContents
-            if let index = blocks.firstIndex(where: { $0.id == editingBlock.blockId }) {
-                var updatedBlock = blocks[index]
+            if let page = selectedPage,
+               let index = page.wrappedBlocks.firstIndex(where: { $0.id == editingBlock.blockId }) {
+                var updatedBlock = page.wrappedBlocks[index]
                 updatedBlock.text = editingBlock.text
                 updatedBlock.backText = editingBlock.backText
                 updatedBlock.group = editingBlock.group
                 updatedBlock.color = editingBlock.group.color
                 updatedBlock.position = editingBlock.position
-                dataManager.updateWrappedBlock(updatedBlock, in: selectedPage)
+                dataManager.updateWrappedBlock(updatedBlock, in: pageId)
             }
         }
     }
@@ -385,6 +459,96 @@ struct WrappedBlockRow: View {
             }
         }
         .padding(.vertical, 8)
+    }
+}
+
+// MARK: - BlockEditView
+struct BlockEditView: View {
+    let editingBlock: BlockManagementView.EditingBlock
+    let onSave: (BlockManagementView.EditingBlock) -> Void
+    
+    @State private var text: String
+    @State private var backText: String
+    @State private var group: BlockGroup
+    @State private var positionX: String
+    @State private var positionY: String
+    @Environment(\.dismiss) private var dismiss
+    
+    init(editingBlock: BlockManagementView.EditingBlock, onSave: @escaping (BlockManagementView.EditingBlock) -> Void) {
+        self.editingBlock = editingBlock
+        self.onSave = onSave
+        self._text = State(initialValue: editingBlock.text)
+        self._backText = State(initialValue: editingBlock.backText)
+        self._group = State(initialValue: editingBlock.group)
+        self._positionX = State(initialValue: String(Int(editingBlock.position.x)))
+        self._positionY = State(initialValue: String(Int(editingBlock.position.y)))
+    }
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("基本情報") {
+                    TextField("表面テキスト", text: $text)
+                    TextField("裏面テキスト", text: $backText)
+                }
+                
+                Section("グループ") {
+                    Picker("グループ", selection: $group) {
+                        ForEach(BlockGroup.allCases, id: \.self) { group in
+                            HStack {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(group.color)
+                                    .frame(width: 16, height: 16)
+                                Text(group.rawValue)
+                            }
+                            .tag(group)
+                        }
+                    }
+                }
+                
+                Section("位置") {
+                    HStack {
+                        Text("X座標")
+                        TextField("X", text: $positionX)
+                            .keyboardType(.numberPad)
+                    }
+                    HStack {
+                        Text("Y座標")
+                        TextField("Y", text: $positionY)
+                            .keyboardType(.numberPad)
+                    }
+                }
+            }
+            .navigationTitle("ブロック編集")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("キャンセル") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("保存") {
+                        saveBlock()
+                    }
+                }
+            }
+        }
+    }
+    
+    private func saveBlock() {
+        guard let x = Double(positionX), let y = Double(positionY) else {
+            return
+        }
+        
+        var updatedBlock = editingBlock
+        updatedBlock.text = text
+        updatedBlock.backText = backText
+        updatedBlock.group = group
+        updatedBlock.position = CGPoint(x: x, y: y)
+        
+        onSave(updatedBlock)
+        dismiss()
     }
 }
 

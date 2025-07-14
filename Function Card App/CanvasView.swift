@@ -10,11 +10,15 @@ import SwiftUI
 struct CanvasView: View {
     @ObservedObject private var dataManager = DataManager.shared
     
-    enum CanvasPage: String, CaseIterable {
-        case mechanism = "仕組みページ"
-        case appearance = "見た目ページ"
-    }
-    @State private var selectedPage: CanvasPage = .mechanism
+    // ページ関連の状態
+    @State private var selectedPageId: UUID?
+    @State private var showingPageManager = false
+    @State private var showingAddPage = false
+    @State private var newPageName = ""
+    
+    // 各ページのオフセットとスケールを管理
+    @State private var pageOffsets: [UUID: CGSize] = [:]
+    @State private var canvasScale: CGFloat = 1.0
     
     // 選択モード関連
     @State private var isSelectionMode: Bool = false
@@ -25,12 +29,7 @@ struct CanvasView: View {
     @State private var isDraggingSelected: Bool = false
     @State private var draggedBlockId: UUID? = nil
     
-    @State private var mechanismOffset: CGSize = .zero
-    @State private var appearanceOffset: CGSize = .zero
-    
-    @State private var canvasScale: CGFloat = 1.0
     @GestureState private var dragOffset: CGSize = .zero
-    
     @GestureState private var gestureScale: CGFloat = 1.0
     
     @State private var showEnlargedText: Bool = false
@@ -44,245 +43,44 @@ struct CanvasView: View {
     private let minScale: CGFloat = 0.25
     private let maxScale: CGFloat = 3.0
     
-    @State private var horizontalSliderValue: Double = 0.5
-    @State private var verticalSliderValue: Double = 0.5
-    
-    private let sliderRange: CGFloat = 2000
-    
-    // DataManagerからデータを取得
-    var mechanismBlocks: [WrapperBlock] { dataManager.mechanismBlocks }
-    var appearanceBlocks: [WrapperBlock] { dataManager.appearanceBlocks }
-    var mechanismContents: [WrappedBlock] { dataManager.mechanismContents }
-    var appearanceContents: [WrappedBlock] { dataManager.appearanceContents }
-    
-    /// 選択モードの切り替え
-    private func toggleSelectionMode() {
-        isSelectionMode.toggle()
-        if !isSelectionMode {
-            selectedWrapperBlocks.removeAll()
-            selectedWrappedBlocks.removeAll()
-        }
+    // 現在のページを取得
+    private var currentPage: Page? {
+        guard let selectedPageId = selectedPageId else { return nil }
+        return dataManager.pages.first { $0.id == selectedPageId }
     }
     
-    /// 選択されたブロックをクリア
-    private func clearSelection() {
-        selectedWrapperBlocks.removeAll()
-        selectedWrappedBlocks.removeAll()
-    }
-    
-    /// 選択されたブロックすべてにオフセットを適用（最適化版）
-    private func applyOffsetToSelectedBlocks(_ offset: CGSize) {
-        // WrapperBlocksにオフセットを適用
-        var updatedMechanismBlocks = dataManager.mechanismBlocks
-        var updatedAppearanceBlocks = dataManager.appearanceBlocks
-        
-        if selectedPage == .mechanism {
-            for i in updatedMechanismBlocks.indices {
-                if selectedWrapperBlocks.contains(updatedMechanismBlocks[i].id) {
-                    updatedMechanismBlocks[i].offset = offset
-                }
-            }
-            dataManager.mechanismBlocks = updatedMechanismBlocks
-        } else {
-            for i in updatedAppearanceBlocks.indices {
-                if selectedWrapperBlocks.contains(updatedAppearanceBlocks[i].id) {
-                    updatedAppearanceBlocks[i].offset = offset
-                }
-            }
-            dataManager.appearanceBlocks = updatedAppearanceBlocks
-        }
-        
-        // WrappedBlocksにオフセットを適用
-        var updatedMechanismContents = dataManager.mechanismContents
-        var updatedAppearanceContents = dataManager.appearanceContents
-        
-        if selectedPage == .mechanism {
-            for i in updatedMechanismContents.indices {
-                if selectedWrappedBlocks.contains(updatedMechanismContents[i].id) {
-                    updatedMechanismContents[i].offset = offset
-                }
-            }
-            dataManager.mechanismContents = updatedMechanismContents
-        } else {
-            for i in updatedAppearanceContents.indices {
-                if selectedWrappedBlocks.contains(updatedAppearanceContents[i].id) {
-                    updatedAppearanceContents[i].offset = offset
-                }
-            }
-            dataManager.appearanceContents = updatedAppearanceContents
-        }
-    }
-    
-    /// 選択されたブロックすべてのポジションを更新してオフセットをリセット（最適化版）
-    private func commitSelectedBlocksPosition() {
-        // WrapperBlocksのポジション更新
-        var updatedMechanismBlocks = dataManager.mechanismBlocks
-        var updatedAppearanceBlocks = dataManager.appearanceBlocks
-        
-        if selectedPage == .mechanism {
-            for i in updatedMechanismBlocks.indices {
-                if selectedWrapperBlocks.contains(updatedMechanismBlocks[i].id) {
-                    updatedMechanismBlocks[i].position.x += updatedMechanismBlocks[i].offset.width
-                    updatedMechanismBlocks[i].position.y += updatedMechanismBlocks[i].offset.height
-                    updatedMechanismBlocks[i].offset = .zero
-                }
-            }
-            dataManager.mechanismBlocks = updatedMechanismBlocks
-        } else {
-            for i in updatedAppearanceBlocks.indices {
-                if selectedWrapperBlocks.contains(updatedAppearanceBlocks[i].id) {
-                    updatedAppearanceBlocks[i].position.x += updatedAppearanceBlocks[i].offset.width
-                    updatedAppearanceBlocks[i].position.y += updatedAppearanceBlocks[i].offset.height
-                    updatedAppearanceBlocks[i].offset = .zero
-                }
-            }
-            dataManager.appearanceBlocks = updatedAppearanceBlocks
-        }
-        
-        // WrappedBlocksのポジション更新
-        var updatedMechanismContents = dataManager.mechanismContents
-        var updatedAppearanceContents = dataManager.appearanceContents
-        
-        if selectedPage == .mechanism {
-            for i in updatedMechanismContents.indices {
-                if selectedWrappedBlocks.contains(updatedMechanismContents[i].id) {
-                    updatedMechanismContents[i].position.x += updatedMechanismContents[i].offset.width
-                    updatedMechanismContents[i].position.y += updatedMechanismContents[i].offset.height
-                    updatedMechanismContents[i].offset = .zero
-                }
-            }
-            dataManager.mechanismContents = updatedMechanismContents
-        } else {
-            for i in updatedAppearanceContents.indices {
-                if selectedWrappedBlocks.contains(updatedAppearanceContents[i].id) {
-                    updatedAppearanceContents[i].position.x += updatedAppearanceContents[i].offset.width
-                    updatedAppearanceContents[i].position.y += updatedAppearanceContents[i].offset.height
-                    updatedAppearanceContents[i].offset = .zero
-                }
-            }
-            dataManager.appearanceContents = updatedAppearanceContents
-        }
-        
-        // データを保存
-        dataManager.saveData()
-    }
-    
-    /// WrapperBlockのframe（CGRect）を返す
-    private func frameForWrapperBlock(_ block: WrapperBlock) -> CGRect {
-        let size = CGSize(width: 360, height: 360)
-        return CGRect(origin: CGPoint(x: block.position.x, y: block.position.y), size: size)
-    }
-    
-    /// WrapperBlockの実際の描画位置を考慮したドロップエリア
-    private func dropAreaForWrapperBlock(_ block: WrapperBlock) -> CGRect {
-        let headerHeight: CGFloat = 60
-        let blockRowHeight: CGFloat = 30
-        let bottomSpace: CGFloat = 30
-        let dynamicHeight = headerHeight + CGFloat(block.wrappedBlocks.count) * blockRowHeight + bottomSpace
-        let adjustedHeight = ceil(dynamicHeight / 30) * 30
-        
-        let margin: CGFloat = 20
-        
-        let centerX = block.position.x + 180
-        let centerY = block.position.y + adjustedHeight / 2
-        
-        let actualLeftTop = CGPoint(
-            x: centerX - 180,
-            y: centerY - adjustedHeight / 2
-        )
-        
-        let frame = CGRect(
-            origin: actualLeftTop,
-            size: CGSize(width: 360, height: adjustedHeight)
-        )
-        
-        return frame.insetBy(dx: margin, dy: margin)
-    }
-    
-    private func narrowFrameForWrapperBlock(_ block: WrapperBlock) -> CGRect {
-        return dropAreaForWrapperBlock(block)
-    }
-    
-    private func moveWrappedBlock(in blockIndex: Int, from sourceIndex: Int, direction: MoveDirection) {
-        var blocks = selectedPage == .mechanism ? mechanismBlocks : appearanceBlocks
-        guard blockIndex < blocks.count else { return }
-        
-        let targetIndex: Int
-        switch direction {
-        case .up:
-            targetIndex = max(0, sourceIndex - 1)
-        case .down:
-            targetIndex = min(blocks[blockIndex].wrappedBlocks.count - 1, sourceIndex + 1)
-        }
-        
-        if sourceIndex != targetIndex {
-            let movedItem = blocks[blockIndex].wrappedBlocks.remove(at: sourceIndex)
-            blocks[blockIndex].wrappedBlocks.insert(movedItem, at: targetIndex)
-            if selectedPage == .mechanism {
-                dataManager.mechanismBlocks = blocks
-            } else {
-                dataManager.appearanceBlocks = blocks
-            }
-            dataManager.saveData()
-        }
-    }
-    
-    private func zoomIn() {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            let newScale = canvasScale + scaleStep
-            canvasScale = min(newScale, maxScale)
-        }
-    }
-    
-    private func zoomOut() {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            let newScale = canvasScale - scaleStep
-            canvasScale = max(newScale, minScale)
-        }
-    }
-    
-    private func resetZoom() {
-        withAnimation(.easeInOut(duration: 0.3)) {
-            canvasScale = 1.0
-        }
-    }
-    
-    private func sliderToOffset(_ value: Double) -> CGFloat {
-        return CGFloat((value - 0.5) * 2 * Double(sliderRange))
-    }
-    
-    private func offsetToSlider(_ offset: CGFloat) -> Double {
-        return Double(offset) / Double(sliderRange * 2) + 0.5
-    }
-    
-    private func updateSlidersFromOffset() {
-        let offset = selectedPage == .mechanism ? mechanismOffset : appearanceOffset
-        horizontalSliderValue = offsetToSlider(offset.width)
-        verticalSliderValue = offsetToSlider(-offset.height)
-        
-        horizontalSliderValue = max(0, min(1, horizontalSliderValue))
-        verticalSliderValue = max(0, min(1, verticalSliderValue))
-    }
-    
-    enum MoveDirection {
-        case up, down
+    // 現在のページのオフセット
+    private var currentOffset: CGSize {
+        guard let selectedPageId = selectedPageId else { return .zero }
+        return pageOffsets[selectedPageId] ?? .zero
     }
     
     var body: some View {
-        NavigationStack{
+        NavigationStack {
             VStack {
                 // 上部のコントロール
                 HStack {
-                    Picker("", selection: $selectedPage) {
-                        ForEach(CanvasPage.allCases, id: \.self) {
-                            Text($0.rawValue)
-                        }
-                    }
-                    .pickerStyle(SegmentedPickerStyle())
+                    // ページ選択
+                    pageSelector
                     
                     Spacer()
                     
-                    // 管理画面ボタンを追加
+                    // ページ管理ボタン
+                    Button(action: { showingPageManager = true }) {
+                        HStack {
+                            Image(systemName: "folder")
+                            Text("ページ管理")
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.purple)
+                        )
+                    }
+                    
+                    // 管理画面ボタン
                     NavigationLink(destination: BlockManagementView()) {
                         HStack {
                             Image(systemName: "list.bullet")
@@ -342,134 +140,9 @@ struct CanvasView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
                 
+                // キャンバス
                 GeometryReader { geometry in
-                    let combinedGesture = DragGesture()
-                        .updating($dragOffset) { value, state, _ in
-                            state = value.translation
-                        }
-                        .onEnded { value in
-                            if selectedPage == .mechanism {
-                                mechanismOffset.width += value.translation.width
-                                mechanismOffset.height += value.translation.height
-                            } else {
-                                appearanceOffset.width += value.translation.width
-                                appearanceOffset.height += value.translation.height
-                            }
-                            updateSlidersFromOffset()
-                        }
-                        .simultaneously(with:
-                                            MagnificationGesture()
-                            .updating($gestureScale) { value, state, _ in
-                                state = value
-                            }
-                            .onEnded { value in
-                                canvasScale *= value
-                                canvasScale = max(minScale, min(maxScale, canvasScale))
-                            }
-                        )
-                    
-                    ZStack {
-                        ZStack {
-                            GridBackgroundView()
-                                .ignoresSafeArea()
-                            
-                            let blocks = selectedPage == .mechanism ? mechanismBlocks : appearanceBlocks
-                            let contents = selectedPage == .mechanism ? mechanismContents : appearanceContents
-                            
-                            ForEach(0..<blocks.count, id: \.self) { index in
-                                wrapperBlockView(
-                                    block: blocks[index],
-                                    index: index,
-                                    isDropTargeted: dropTargetedWrapperIndex == index,
-                                    isSelected: selectedWrapperBlocks.contains(blocks[index].id)
-                                )
-                            }
-                            ForEach(0..<contents.count, id: \.self) { index in
-                                wrappedBlockView(
-                                    block: contents[index],
-                                    index: index,
-                                    isSelected: selectedWrappedBlocks.contains(contents[index].id)
-                                )
-                            }
-                        }
-                        .scaleEffect(canvasScale * gestureScale)
-                        .offset(x: (selectedPage == .mechanism ? mechanismOffset.width : appearanceOffset.width) + dragOffset.width,
-                                y: (selectedPage == .mechanism ? mechanismOffset.height : appearanceOffset.height) + dragOffset.height)
-                        .gesture( combinedGesture)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        
-                        VStack {
-                            HStack {
-                                Spacer()
-                                HStack(spacing: 8) {
-                                    Button(action: zoomOut) {
-                                        Image(systemName: "minus")
-                                            .font(.system(size: 18, weight: .bold))
-                                            .foregroundColor(.white)
-                                            .frame(width: 44, height: 44)
-                                            .background(
-                                                Circle()
-                                                    .fill(canvasScale <= minScale ? Color.gray : Color.blue)
-                                                    .shadow(color: .black.opacity(0.2), radius: 3, x: 0, y: 2)
-                                            )
-                                    }
-                                    .disabled(canvasScale <= minScale)
-                                    .buttonStyle(PlainButtonStyle())
-                                    
-                                    Text("\(Int(canvasScale * 100))%")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 6)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .fill(Color.black.opacity(0.7))
-                                        )
-                                        .onTapGesture {
-                                            resetZoom()
-                                        }
-                                    
-                                    Button(action: zoomIn) {
-                                        Image(systemName: "plus")
-                                            .font(.system(size: 18, weight: .bold))
-                                            .foregroundColor(.white)
-                                            .frame(width: 44, height: 44)
-                                            .background(
-                                                Circle()
-                                                    .fill(canvasScale >= maxScale ? Color.gray : Color.blue)
-                                                    .shadow(color: .black.opacity(0.2), radius: 3, x: 0, y: 2)
-                                            )
-                                    }
-                                    .disabled(canvasScale >= maxScale)
-                                    .buttonStyle(PlainButtonStyle())
-                                }
-                                .padding(.trailing, 80)
-                            }
-                            Spacer()
-                            
-                            // 選択状態の表示
-                            if isSelectionMode {
-                                VStack {
-                                    Spacer()
-                                    HStack {
-                                        Text("選択中: \(selectedWrapperBlocks.count + selectedWrappedBlocks.count)個")
-                                            .font(.caption)
-                                            .foregroundColor(.white)
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 6)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 8)
-                                                    .fill(Color.black.opacity(0.7))
-                                            )
-                                        Spacer()
-                                    }
-                                    .padding(.bottom, 20)
-                                    .padding(.leading, 20)
-                                }
-                            }
-                        }
-                        .padding(.top, 20)
-                    }
+                    canvasContent(geometry: geometry)
                 }
             }
             .navigationBarHidden(true)
@@ -483,22 +156,355 @@ struct CanvasView: View {
                     .padding(32)
             }
         }
+        .sheet(isPresented: $showingPageManager) {
+            PageManagerView(isPresented: $showingPageManager, selectedPageId: $selectedPageId)
+        }
         .onAppear {
-            updateSlidersFromOffset()
+            initializeSelectedPage()
+        }
+        .onChange(of: dataManager.pages) { _ in
+            // ページが変更された時の処理
+            if selectedPageId == nil || !dataManager.pages.contains(where: { $0.id == selectedPageId }) {
+                initializeSelectedPage()
+            }
         }
     }
     
-    private func moveRow(index: Int, from source: IndexSet, to destination: Int) {
-        var blocks = selectedPage == .mechanism ? mechanismBlocks : appearanceBlocks
-        blocks[index].wrappedBlocks.move(fromOffsets: source, toOffset: destination)
-        if selectedPage == .mechanism {
-            dataManager.mechanismBlocks = blocks
-        } else {
-            dataManager.appearanceBlocks = blocks
+    // MARK: - ページセレクター
+    private var pageSelector: some View {
+        HStack {
+            if dataManager.pages.isEmpty {
+                Text("ページなし")
+                    .foregroundColor(.gray)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.gray, lineWidth: 1)
+                    )
+            } else {
+                Menu {
+                    ForEach(dataManager.pages, id: \.id) { page in
+                        Button(page.name) {
+                            selectedPageId = page.id
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text(currentPage?.name ?? "ページを選択")
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                    }
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.primary, lineWidth: 1)
+                    )
+                }
+            }
         }
+    }
+    
+    // MARK: - キャンバスコンテンツ
+    private func canvasContent(geometry: GeometryProxy) -> some View {
+        let combinedGesture = DragGesture()
+            .updating($dragOffset) { value, state, _ in
+                state = value.translation
+            }
+            .onEnded { value in
+                if let selectedPageId = selectedPageId {
+                    let currentOffset = pageOffsets[selectedPageId] ?? .zero
+                    pageOffsets[selectedPageId] = CGSize(
+                        width: currentOffset.width + value.translation.width,
+                        height: currentOffset.height + value.translation.height
+                    )
+                }
+            }
+            .simultaneously(with:
+                MagnificationGesture()
+                    .updating($gestureScale) { value, state, _ in
+                        state = value
+                    }
+                    .onEnded { value in
+                        canvasScale *= value
+                        canvasScale = max(minScale, min(maxScale, canvasScale))
+                    }
+            )
+        
+        return ZStack {
+            ZStack {
+                GridBackgroundView()
+                    .ignoresSafeArea()
+                
+                if let page = currentPage {
+                    // WrapperBlocks
+                    ForEach(0..<page.wrapperBlocks.count, id: \.self) { index in
+                        wrapperBlockView(
+                            block: page.wrapperBlocks[index],
+                            index: index,
+                            isDropTargeted: dropTargetedWrapperIndex == index,
+                            isSelected: selectedWrapperBlocks.contains(page.wrapperBlocks[index].id)
+                        )
+                    }
+                    
+                    // WrappedBlocks
+                    ForEach(0..<page.wrappedBlocks.count, id: \.self) { index in
+                        wrappedBlockView(
+                            block: page.wrappedBlocks[index],
+                            index: index,
+                            isSelected: selectedWrappedBlocks.contains(page.wrappedBlocks[index].id)
+                        )
+                    }
+                } else {
+                    // ページが選択されていない場合
+                    VStack {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 48))
+                            .foregroundColor(.gray)
+                        Text("ページを選択してください")
+                            .font(.headline)
+                            .foregroundColor(.gray)
+                    }
+                }
+            }
+            .scaleEffect(canvasScale * gestureScale)
+            .offset(x: currentOffset.width + dragOffset.width,
+                    y: currentOffset.height + dragOffset.height)
+            .gesture(combinedGesture)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            
+            // オーバーレイコントロール
+            overlayControls
+        }
+    }
+    
+    // MARK: - オーバーレイコントロール
+    private var overlayControls: some View {
+        VStack {
+            HStack {
+                Spacer()
+                HStack(spacing: 8) {
+                    Button(action: zoomOut) {
+                        Image(systemName: "minus")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(
+                                Circle()
+                                    .fill(canvasScale <= minScale ? Color.gray : Color.blue)
+                                    .shadow(color: .black.opacity(0.2), radius: 3, x: 0, y: 2)
+                            )
+                    }
+                    .disabled(canvasScale <= minScale)
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    Text("\(Int(canvasScale * 100))%")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.black.opacity(0.7))
+                        )
+                        .onTapGesture {
+                            resetZoom()
+                        }
+                    
+                    Button(action: zoomIn) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(
+                                Circle()
+                                    .fill(canvasScale >= maxScale ? Color.gray : Color.blue)
+                                    .shadow(color: .black.opacity(0.2), radius: 3, x: 0, y: 2)
+                            )
+                    }
+                    .disabled(canvasScale >= maxScale)
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding(.trailing, 80)
+            }
+            Spacer()
+            
+            // 選択状態の表示
+            if isSelectionMode {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Text("選択中: \(selectedWrapperBlocks.count + selectedWrappedBlocks.count)個")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.black.opacity(0.7))
+                            )
+                        Spacer()
+                    }
+                    .padding(.bottom, 20)
+                    .padding(.leading, 20)
+                }
+            }
+        }
+        .padding(.top, 20)
+    }
+    
+    // MARK: - ヘルパー関数
+    private func initializeSelectedPage() {
+        if selectedPageId == nil && !dataManager.pages.isEmpty {
+            selectedPageId = dataManager.pages.first?.id
+        }
+    }
+    
+    private func toggleSelectionMode() {
+        isSelectionMode.toggle()
+        if !isSelectionMode {
+            selectedWrapperBlocks.removeAll()
+            selectedWrappedBlocks.removeAll()
+        }
+    }
+    
+    private func clearSelection() {
+        selectedWrapperBlocks.removeAll()
+        selectedWrappedBlocks.removeAll()
+    }
+    
+    private func zoomIn() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            let newScale = canvasScale + scaleStep
+            canvasScale = min(newScale, maxScale)
+        }
+    }
+    
+    private func zoomOut() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            let newScale = canvasScale - scaleStep
+            canvasScale = max(newScale, minScale)
+        }
+    }
+    
+    private func resetZoom() {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            canvasScale = 1.0
+        }
+    }
+    
+    // MARK: - ブロック操作メソッド
+    private func applyOffsetToSelectedBlocks(_ offset: CGSize) {
+        guard let pageId = selectedPageId,
+              let pageIndex = dataManager.pages.firstIndex(where: { $0.id == pageId }) else { return }
+        
+        var updatedPage = dataManager.pages[pageIndex]
+        
+        // WrapperBlocksにオフセットを適用
+        for i in updatedPage.wrapperBlocks.indices {
+            if selectedWrapperBlocks.contains(updatedPage.wrapperBlocks[i].id) {
+                updatedPage.wrapperBlocks[i].offset = offset
+            }
+        }
+        
+        // WrappedBlocksにオフセットを適用
+        for i in updatedPage.wrappedBlocks.indices {
+            if selectedWrappedBlocks.contains(updatedPage.wrappedBlocks[i].id) {
+                updatedPage.wrappedBlocks[i].offset = offset
+            }
+        }
+        
+        dataManager.pages[pageIndex] = updatedPage
+    }
+    
+    private func commitSelectedBlocksPosition() {
+        guard let pageId = selectedPageId,
+              let pageIndex = dataManager.pages.firstIndex(where: { $0.id == pageId }) else { return }
+        
+        var updatedPage = dataManager.pages[pageIndex]
+        
+        // WrapperBlocksのポジション更新
+        for i in updatedPage.wrapperBlocks.indices {
+            if selectedWrapperBlocks.contains(updatedPage.wrapperBlocks[i].id) {
+                updatedPage.wrapperBlocks[i].position.x += updatedPage.wrapperBlocks[i].offset.width
+                updatedPage.wrapperBlocks[i].position.y += updatedPage.wrapperBlocks[i].offset.height
+                updatedPage.wrapperBlocks[i].offset = .zero
+            }
+        }
+        
+        // WrappedBlocksのポジション更新
+        for i in updatedPage.wrappedBlocks.indices {
+            if selectedWrappedBlocks.contains(updatedPage.wrappedBlocks[i].id) {
+                updatedPage.wrappedBlocks[i].position.x += updatedPage.wrappedBlocks[i].offset.width
+                updatedPage.wrappedBlocks[i].position.y += updatedPage.wrappedBlocks[i].offset.height
+                updatedPage.wrappedBlocks[i].offset = .zero
+            }
+        }
+        
+        dataManager.pages[pageIndex] = updatedPage
         dataManager.saveData()
     }
     
+    private func frameForWrapperBlock(_ block: WrapperBlock) -> CGRect {
+        let size = CGSize(width: 360, height: 360)
+        return CGRect(origin: CGPoint(x: block.position.x, y: block.position.y), size: size)
+    }
+    
+    private func dropAreaForWrapperBlock(_ block: WrapperBlock) -> CGRect {
+        let headerHeight: CGFloat = 60
+        let blockRowHeight: CGFloat = 30
+        let bottomSpace: CGFloat = 30
+        let dynamicHeight = headerHeight + CGFloat(block.wrappedBlocks.count) * blockRowHeight + bottomSpace
+        let adjustedHeight = ceil(dynamicHeight / 30) * 30
+        
+        let margin: CGFloat = 20
+        
+        let centerX = block.position.x + 180
+        let centerY = block.position.y + adjustedHeight / 2
+        
+        let actualLeftTop = CGPoint(
+            x: centerX - 180,
+            y: centerY - adjustedHeight / 2
+        )
+        
+        let frame = CGRect(
+            origin: actualLeftTop,
+            size: CGSize(width: 360, height: adjustedHeight)
+        )
+        
+        return frame.insetBy(dx: margin, dy: margin)
+    }
+    
+    private func moveWrappedBlock(in blockIndex: Int, from sourceIndex: Int, direction: MoveDirection) {
+        guard let pageId = selectedPageId,
+              let pageIndex = dataManager.pages.firstIndex(where: { $0.id == pageId }) else { return }
+        
+        var page = dataManager.pages[pageIndex]
+        guard blockIndex < page.wrapperBlocks.count else { return }
+        
+        let targetIndex: Int
+        switch direction {
+        case .up:
+            targetIndex = max(0, sourceIndex - 1)
+        case .down:
+            targetIndex = min(page.wrapperBlocks[blockIndex].wrappedBlocks.count - 1, sourceIndex + 1)
+        }
+        
+        if sourceIndex != targetIndex {
+            let movedItem = page.wrapperBlocks[blockIndex].wrappedBlocks.remove(at: sourceIndex)
+            page.wrapperBlocks[blockIndex].wrappedBlocks.insert(movedItem, at: targetIndex)
+            dataManager.pages[pageIndex] = page
+            dataManager.saveData()
+        }
+    }
+    
+    enum MoveDirection {
+        case up, down
+    }
+    
+    // MARK: - WrapperBlockView
     private func wrapperBlockView(block: WrapperBlock, index: Int, isDropTargeted: Bool, isSelected: Bool) -> some View {
         let headerHeight: CGFloat = 60
         let blockRowHeight: CGFloat = 30
@@ -555,36 +561,28 @@ struct CanvasView: View {
                                 wrappedIndex: wrappedIndex,
                                 wrappedBlocks: Binding(
                                     get: {
-                                        if selectedPage == .mechanism {
-                                            return mechanismBlocks[index].wrappedBlocks
-                                        } else {
-                                            return appearanceBlocks[index].wrappedBlocks
-                                        }
+                                        guard let pageId = selectedPageId,
+                                              let page = dataManager.pages.first(where: { $0.id == pageId }),
+                                              index < page.wrapperBlocks.count else { return [] }
+                                        return page.wrapperBlocks[index].wrappedBlocks
                                     },
                                     set: { newValue in
-                                        var blocks = selectedPage == .mechanism ? dataManager.mechanismBlocks : dataManager.appearanceBlocks
-                                        blocks[index].wrappedBlocks = newValue
-                                        if selectedPage == .mechanism {
-                                            dataManager.mechanismBlocks = blocks
-                                        } else {
-                                            dataManager.appearanceBlocks = blocks
-                                        }
+                                        guard let pageId = selectedPageId,
+                                              let pageIndex = dataManager.pages.firstIndex(where: { $0.id == pageId }),
+                                              index < dataManager.pages[pageIndex].wrapperBlocks.count else { return }
+                                        dataManager.pages[pageIndex].wrapperBlocks[index].wrappedBlocks = newValue
                                         dataManager.saveData()
                                     }),
                                 contents: Binding(
                                     get: {
-                                        if selectedPage == .mechanism {
-                                            return mechanismContents
-                                        } else {
-                                            return appearanceContents
-                                        }
+                                        guard let pageId = selectedPageId,
+                                              let page = dataManager.pages.first(where: { $0.id == pageId }) else { return [] }
+                                        return page.wrappedBlocks
                                     },
                                     set: { newValue in
-                                        if selectedPage == .mechanism {
-                                            dataManager.mechanismContents = newValue
-                                        } else {
-                                            dataManager.appearanceContents = newValue
-                                        }
+                                        guard let pageId = selectedPageId,
+                                              let pageIndex = dataManager.pages.firstIndex(where: { $0.id == pageId }) else { return }
+                                        dataManager.pages[pageIndex].wrappedBlocks = newValue
                                         dataManager.saveData()
                                     }),
                                 frameForWrapperBlock: frameForWrapperBlock,
@@ -598,9 +596,12 @@ struct CanvasView: View {
                                 canMoveUp: wrappedIndex > 0,
                                 canMoveDown: wrappedIndex < block.wrappedBlocks.count - 1,
                                 onEnlargeRequested: { text, textColor, bgColor in
-                                    enlargedText = text
-                                    enlargedTextColor = textColor
-                                    enlargedBackgroundColor = bgColor
+                                    Task{
+                                        enlargedText = text
+                                        enlargedTextColor = textColor
+                                        enlargedBackgroundColor = bgColor
+                                        print(enlargedText)
+                                    }
                                     showEnlargedText = true
                                 }
                             )
@@ -615,7 +616,7 @@ struct CanvasView: View {
         .frame(width: 360, height: adjustedHeight)
         .position(
             x: block.position.x + block.offset.width,
-            y: block.position.y +  block.offset.height
+            y: block.position.y + block.offset.height
         )
         .onTapGesture {
             if isSelectionMode {
@@ -625,13 +626,10 @@ struct CanvasView: View {
                     selectedWrapperBlocks.insert(block.id)
                 }
             } else {
-                var blocks = selectedPage == .mechanism ? dataManager.mechanismBlocks : dataManager.appearanceBlocks
-                blocks[index].isFlipped.toggle()
-                if selectedPage == .mechanism {
-                    dataManager.mechanismBlocks = blocks
-                } else {
-                    dataManager.appearanceBlocks = blocks
-                }
+                guard let pageId = selectedPageId,
+                      let pageIndex = dataManager.pages.firstIndex(where: { $0.id == pageId }),
+                      index < dataManager.pages[pageIndex].wrapperBlocks.count else { return }
+                dataManager.pages[pageIndex].wrapperBlocks[index].isFlipped.toggle()
                 dataManager.saveData()
             }
         }
@@ -639,47 +637,41 @@ struct CanvasView: View {
             DragGesture()
                 .onChanged { value in
                     if isSelectionMode {
-                        // 選択モード: 選択されたすべてのブロックに同じオフセットを適用
                         applyOffsetToSelectedBlocks(value.translation)
                     } else {
-                        // 単体モード: このブロックのみにオフセットを適用
-                        var blocks = selectedPage == .mechanism ? dataManager.mechanismBlocks : dataManager.appearanceBlocks
-                        blocks[index].offset = value.translation
-                        if selectedPage == .mechanism {
-                            dataManager.mechanismBlocks = blocks
-                        } else {
-                            dataManager.appearanceBlocks = blocks
-                        }
+                        guard let pageId = selectedPageId,
+                              let pageIndex = dataManager.pages.firstIndex(where: { $0.id == pageId }),
+                              index < dataManager.pages[pageIndex].wrapperBlocks.count else { return }
+                        dataManager.pages[pageIndex].wrapperBlocks[index].offset = value.translation
                     }
                 }
                 .onEnded { value in
                     if isSelectionMode {
-                        // 選択モード: 選択されたすべてのブロックのポジションを更新
                         commitSelectedBlocksPosition()
                     } else {
-                        // 単体モード: このブロックのみのポジションを更新
-                        var blocks = selectedPage == .mechanism ? dataManager.mechanismBlocks : dataManager.appearanceBlocks
-                        blocks[index].position.x += value.translation.width
-                        blocks[index].position.y += value.translation.height
-                        blocks[index].offset = .zero
-                        if selectedPage == .mechanism {
-                            dataManager.mechanismBlocks = blocks
-                        } else {
-                            dataManager.appearanceBlocks = blocks
-                        }
+                        guard let pageId = selectedPageId,
+                              let pageIndex = dataManager.pages.firstIndex(where: { $0.id == pageId }),
+                              index < dataManager.pages[pageIndex].wrapperBlocks.count else { return }
+                        dataManager.pages[pageIndex].wrapperBlocks[index].position.x += value.translation.width
+                        dataManager.pages[pageIndex].wrapperBlocks[index].position.y += value.translation.height
+                        dataManager.pages[pageIndex].wrapperBlocks[index].offset = .zero
                         dataManager.saveData()
                     }
                     draggedBlockId = nil
                 }
         )
         .onLongPressGesture {
-            enlargedText = block.isFlipped ? block.backText : block.text
-            enlargedTextColor = block.isFlipped ? Color.white : Color.primary
-            enlargedBackgroundColor = block.isFlipped ? block.color : Color.white
+            Task{
+                enlargedText = block.isFlipped ? block.backText : block.text
+                enlargedTextColor = block.isFlipped ? Color.white : Color.primary
+                enlargedBackgroundColor = block.isFlipped ? block.color : Color.white
+                print(enlargedText)
+            }
             showEnlargedText = true
         }
     }
     
+    // MARK: - WrappedBlockView
     private func wrappedBlockView(block: WrappedBlock, index: Int, isSelected: Bool) -> some View {
         ZStack {
             Rectangle()
@@ -716,8 +708,8 @@ struct CanvasView: View {
         }
         .frame(width: 240, height: 90)
         .position(
-            x: block.position.x  + block.offset.width,
-            y: block.position.y  + block.offset.height
+            x: block.position.x + block.offset.width,
+            y: block.position.y + block.offset.height
         )
         .onTapGesture {
             if isSelectionMode {
@@ -727,13 +719,10 @@ struct CanvasView: View {
                     selectedWrappedBlocks.insert(block.id)
                 }
             } else {
-                var contents = selectedPage == .mechanism ? dataManager.mechanismContents : dataManager.appearanceContents
-                contents[index].isFlipped.toggle()
-                if selectedPage == .mechanism {
-                    dataManager.mechanismContents = contents
-                } else {
-                    dataManager.appearanceContents = contents
-                }
+                guard let pageId = selectedPageId,
+                      let pageIndex = dataManager.pages.firstIndex(where: { $0.id == pageId }),
+                      index < dataManager.pages[pageIndex].wrappedBlocks.count else { return }
+                dataManager.pages[pageIndex].wrappedBlocks[index].isFlipped.toggle()
                 dataManager.saveData()
             }
         }
@@ -741,23 +730,18 @@ struct CanvasView: View {
             DragGesture()
                 .onChanged { value in
                     if isSelectionMode {
-                        // 選択モード: 選択されたすべてのブロックに同じオフセットを適用
                         applyOffsetToSelectedBlocks(value.translation)
                     } else {
-                        // 単体モード: このブロックのみにオフセットを適用（直接インデックス指定で高速化）
-                        var contents = selectedPage == .mechanism ? dataManager.mechanismContents : dataManager.appearanceContents
-                        contents[index].position = value.location
-                        if selectedPage == .mechanism {
-                            dataManager.mechanismContents = contents
-                        } else {
-                            dataManager.appearanceContents = contents
-                        }
+                        guard let pageId = selectedPageId,
+                              let pageIndex = dataManager.pages.firstIndex(where: { $0.id == pageId }),
+                              index < dataManager.pages[pageIndex].wrappedBlocks.count else { return }
+                        dataManager.pages[pageIndex].wrappedBlocks[index].position = value.location
                     }
                     
                     // ドロップターゲットの検出
+                    guard let page = currentPage else { return }
                     let dragPosition = value.location
-                    let blocks = selectedPage == .mechanism ? mechanismBlocks : appearanceBlocks
-                    if let targetIndex = blocks.firstIndex(where: { dropAreaForWrapperBlock($0).contains(dragPosition) }) {
+                    if let targetIndex = page.wrapperBlocks.firstIndex(where: { dropAreaForWrapperBlock($0).contains(dragPosition) }) {
                         dropTargetedWrapperIndex = targetIndex
                     } else {
                         dropTargetedWrapperIndex = nil
@@ -765,52 +749,49 @@ struct CanvasView: View {
                 }
                 .onEnded { value in
                     let droppedPosition = value.location
-                    var contents = selectedPage == .mechanism ? dataManager.mechanismContents : dataManager.appearanceContents
-                    var blocks = selectedPage == .mechanism ? dataManager.mechanismBlocks : dataManager.appearanceBlocks
+                    guard let pageId = selectedPageId,
+                          let pageIndex = dataManager.pages.firstIndex(where: { $0.id == pageId }) else { return }
+                    
+                    var page = dataManager.pages[pageIndex]
                     
                     if isSelectionMode {
-                        // 選択モード: 選択されたすべてのブロックのポジションを更新
                         commitSelectedBlocksPosition()
                     } else {
-                        // 単体モード: WrapperBlockにドロップするかまたは位置更新
-                        if let targetIndex = blocks.firstIndex(where: { dropAreaForWrapperBlock($0).contains(droppedPosition) }) {
-                            // WrapperBlockへのドロップ
-                            let movedBlock = contents[index]
+                        guard index < page.wrappedBlocks.count else { return }
+                        
+                        // WrapperBlockへのドロップ
+                        if let targetIndex = page.wrapperBlocks.firstIndex(where: { dropAreaForWrapperBlock($0).contains(droppedPosition) }) {
+                            let movedBlock = page.wrappedBlocks[index]
                             var newBlock = movedBlock
                             newBlock.position = .zero
                             newBlock.offset = .zero
-                            blocks[targetIndex].wrappedBlocks.append(newBlock)
-                            contents.remove(at: index)
-                            if selectedPage == .mechanism {
-                                dataManager.mechanismBlocks = blocks
-                                dataManager.mechanismContents = contents
-                            } else {
-                                dataManager.appearanceBlocks = blocks
-                                dataManager.appearanceContents = contents
-                            }
+                            page.wrapperBlocks[targetIndex].wrappedBlocks.append(newBlock)
+                            page.wrappedBlocks.remove(at: index)
                         } else {
                             // 位置更新
-                            contents[index].position = value.location
-                            contents[index].offset = .zero
-                            if selectedPage == .mechanism {
-                                dataManager.mechanismContents = contents
-                            } else {
-                                dataManager.appearanceContents = contents
-                            }
+                            page.wrappedBlocks[index].position = value.location
+                            page.wrappedBlocks[index].offset = .zero
                         }
+                        dataManager.pages[pageIndex] = page
                         dataManager.saveData()
                     }
                     dropTargetedWrapperIndex = nil
                 }
         )
         .onLongPressGesture {
-            enlargedText = block.isFlipped ? block.backText : block.text
-            enlargedTextColor = block.isFlipped ? Color.white : Color.primary
-            enlargedBackgroundColor = block.isFlipped ? block.color : Color.white
+            Task{
+                enlargedText = block.isFlipped ? block.backText : block.text
+                enlargedTextColor = block.isFlipped ? Color.white : Color.primary
+                enlargedBackgroundColor = block.isFlipped ? block.color : Color.white
+                print(enlargedText)
+                print(enlargedTextColor)
+                print(enlargedBackgroundColor)
+            }
             showEnlargedText = true
         }
     }
     
+    // MARK: - DraggableRowView
     struct DraggableRowView: View {
         let content: WrappedBlock
         let blockIndex: Int
@@ -906,6 +887,7 @@ struct CanvasView: View {
         }
     }
     
+    // MARK: - GridBackgroundView
     private struct GridBackgroundView: View {
         let gridSize: CGFloat = 30
         let lineColor: Color = .gray.opacity(0.15)
@@ -913,8 +895,8 @@ struct CanvasView: View {
         
         var body: some View {
             GeometryReader { geometry in
-                let width = geometry.size.width*3
-                let height = geometry.size.width*3
+                let width = geometry.size.width * 3
+                let height = geometry.size.width * 3
                 Path { path in
                     stride(from: 0, through: width, by: gridSize).forEach { x in
                         path.move(to: CGPoint(x: x, y: 0))
@@ -926,6 +908,103 @@ struct CanvasView: View {
                     }
                 }
                 .stroke(lineColor, lineWidth: lineWidth)
+            }
+        }
+    }
+}
+
+// MARK: - PageManagerView
+struct PageManagerView: View {
+    @Binding var isPresented: Bool
+    @Binding var selectedPageId: UUID?
+    @ObservedObject private var dataManager = DataManager.shared
+    @State private var showingAddPage = false
+    @State private var newPageName = ""
+    @State private var editingPageId: UUID?
+    @State private var editingPageName = ""
+    
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(dataManager.pages, id: \.id) { page in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(page.name)
+                                .font(.headline)
+                            Text("\(page.wrapperBlocks.count)個のWrapperBlock, \(page.wrappedBlocks.count)個のWrappedBlock")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Spacer()
+                        
+                        if selectedPageId == page.id {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.blue)
+                        }
+                        
+                        Button("編集") {
+                            editingPageId = page.id
+                            editingPageName = page.name
+                        }
+                        .buttonStyle(BorderlessButtonStyle())
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        selectedPageId = page.id
+                    }
+                }
+                .onDelete(perform: deletePages)
+            }
+            .navigationTitle("ページ管理")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("閉じる") {
+                        isPresented = false
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("新規ページ") {
+                        showingAddPage = true
+                    }
+                }
+            }
+            .alert("ページ名を編集", isPresented: .constant(editingPageId != nil)) {
+                TextField("ページ名", text: $editingPageName)
+                Button("保存") {
+                    if let pageId = editingPageId {
+                        dataManager.updatePageName(id: pageId, newName: editingPageName)
+                    }
+                    editingPageId = nil
+                    editingPageName = ""
+                }
+                Button("キャンセル", role: .cancel) {
+                    editingPageId = nil
+                    editingPageName = ""
+                }
+            }
+            .alert("新しいページ", isPresented: $showingAddPage) {
+                TextField("ページ名", text: $newPageName)
+                Button("作成") {
+                    if !newPageName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        dataManager.addPage(name: newPageName)
+                        newPageName = ""
+                    }
+                }
+                Button("キャンセル", role: .cancel) {
+                    newPageName = ""
+                }
+            }
+        }
+    }
+    
+    private func deletePages(offsets: IndexSet) {
+        for index in offsets {
+            let page = dataManager.pages[index]
+            dataManager.deletePage(id: page.id)
+            if selectedPageId == page.id {
+                selectedPageId = dataManager.pages.first?.id
             }
         }
     }

@@ -8,6 +8,30 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Page構造体
+struct Page: Identifiable, Codable,Equatable {
+    let id: UUID
+    var name: String
+    var wrapperBlocks: [WrapperBlock]
+    var wrappedBlocks: [WrappedBlock]
+    
+    init(id: UUID = UUID(), name: String, wrapperBlocks: [WrapperBlock] = [], wrappedBlocks: [WrappedBlock] = []) {
+        self.id = id
+        self.name = name
+        self.wrapperBlocks = wrapperBlocks
+        self.wrappedBlocks = wrappedBlocks
+    }
+}
+
+extension Page {
+    static func == (lhs: Page, rhs: Page) -> Bool {
+        return lhs.id == rhs.id &&
+               lhs.name == rhs.name &&
+               lhs.wrapperBlocks == rhs.wrapperBlocks &&
+               lhs.wrappedBlocks == rhs.wrappedBlocks
+    }
+}
+
 // MARK: - BlockGroup列挙型
 enum BlockGroup: String, CaseIterable, Codable {
     case function = "関数"
@@ -50,7 +74,7 @@ enum BlockGroup: String, CaseIterable, Codable {
 }
 
 // MARK: - WrapperBlock構造体
-struct WrapperBlock: Identifiable, Codable {
+struct WrapperBlock: Identifiable, Codable, Equatable {
     let id: UUID
     var position: CGPoint
     var offset: CGSize = .zero
@@ -79,6 +103,18 @@ struct WrapperBlock: Identifiable, Codable {
         self.isFlipped = isFlipped
         self.group = group
         self.wrappedBlocks = wrappedBlocks
+    }
+    
+    static func == (lhs: WrapperBlock, rhs: WrapperBlock) -> Bool {
+        return lhs.id == rhs.id &&
+               lhs.position == rhs.position &&
+               lhs.offset == rhs.offset &&
+               lhs.text == rhs.text &&
+               lhs.backText == rhs.backText &&
+               lhs.isFlipped == rhs.isFlipped &&
+               lhs.group == rhs.group &&
+               lhs.wrappedBlocks == rhs.wrappedBlocks &&
+               lhs.color.description == rhs.color.description
     }
     
     // MARK: - Codable対応

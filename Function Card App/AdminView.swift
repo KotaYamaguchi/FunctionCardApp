@@ -10,7 +10,7 @@ import SwiftUI
 struct AdminView: View {
     @ObservedObject private var dataManager = DataManager.shared
     
-    @State private var selectedPage: CanvasView.CanvasPage = .mechanism
+    @State private var selectedPageId: UUID?
     @State private var selectedBlockType: BlockType = .wrapper
     @State private var selectedMode: AddMode = .single
     @State private var batchInputFormat: BatchInputFormat = .pipeDelimited
@@ -72,6 +72,12 @@ struct AdminView: View {
         }
     }
     
+    // 現在選択されているページ
+    private var selectedPage: Page? {
+        guard let selectedPageId = selectedPageId else { return nil }
+        return dataManager.pages.first { $0.id == selectedPageId }
+    }
+    
     var body: some View {
         VStack(spacing: 20) {
             // ページ選択
@@ -80,12 +86,43 @@ struct AdminView: View {
                     .font(.headline)
                     .foregroundColor(.primary)
                 
-                Picker("ページ選択", selection: $selectedPage) {
-                    ForEach(CanvasView.CanvasPage.allCases, id: \.self) {
-                        Text($0.rawValue)
+                if dataManager.pages.isEmpty {
+                    HStack {
+                        Text("ページがありません")
+                            .foregroundColor(.gray)
+                        Spacer()
+                        Button("新規ページ作成") {
+                            createDefaultPage()
+                        }
+                        .foregroundColor(.blue)
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.gray, lineWidth: 1)
+                    )
+                } else {
+                    Menu {
+                        ForEach(dataManager.pages, id: \.id) { page in
+                            Button(page.name) {
+                                selectedPageId = page.id
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Text(selectedPage?.name ?? "ページを選択")
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.down")
+                                .foregroundColor(.primary)
+                        }
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.primary, lineWidth: 1)
+                        )
                     }
                 }
-                .pickerStyle(SegmentedPickerStyle())
             }
             .padding(.horizontal)
             
@@ -121,17 +158,37 @@ struct AdminView: View {
             
             ScrollView {
                 VStack(spacing: 20) {
-                    if selectedMode == .single {
-                        if selectedBlockType == .wrapper {
-                            wrapperBlockForm
+                    if selectedPageId != nil {
+                        if selectedMode == .single {
+                            if selectedBlockType == .wrapper {
+                                wrapperBlockForm
+                            } else {
+                                wrappedBlockForm
+                            }
+                            addButton
                         } else {
-                            wrappedBlockForm
+                            batchInputFormatSelector
+                            batchAddForm
+                            batchAddButton
                         }
-                        addButton
                     } else {
-                        batchInputFormatSelector
-                        batchAddForm
-                        batchAddButton
+                        // ページが選択されていない場合の表示
+                        VStack(spacing: 16) {
+                            Image(systemName: "doc.text")
+                                .font(.system(size: 48))
+                                .foregroundColor(.gray)
+                            Text("ページを選択してください")
+                                .font(.headline)
+                                .foregroundColor(.gray)
+                            
+                            if !dataManager.pages.isEmpty {
+                                Button("最初のページを選択") {
+                                    selectedPageId = dataManager.pages.first?.id
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
+                        }
+                        .padding()
                     }
                     
                     Spacer(minLength: 100)
@@ -145,6 +202,12 @@ struct AdminView: View {
             Button("OK") { }
         } message: {
             Text(alertMessage)
+        }
+        .onAppear {
+            // 初期ページ選択
+            if selectedPageId == nil && !dataManager.pages.isEmpty {
+                selectedPageId = dataManager.pages.first?.id
+            }
         }
     }
     
@@ -528,6 +591,12 @@ struct AdminView: View {
         .buttonStyle(PlainButtonStyle())
     }
     
+    // MARK: - ヘルパー関数
+    private func createDefaultPage() {
+        dataManager.addPage(name: "新しいページ")
+        selectedPageId = dataManager.pages.last?.id
+    }
+    
     // MARK: - グループ文字列をBlockGroupに変換
     private func parseBlockGroup(from text: String) -> BlockGroup {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -536,6 +605,11 @@ struct AdminView: View {
     
     // MARK: - バッチ追加処理
     private func batchAddBlocks() {
+        guard let pageId = selectedPageId else {
+            showAlert(message: "ページを選択してください")
+            return
+        }
+        
         // 入力検証
         guard !batchData.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             showAlert(message: "ブロックデータを入力してください")
@@ -610,7 +684,7 @@ struct AdminView: View {
                     group: blockGroup
                 )
                 
-                dataManager.addWrapperBlock(newBlock, to: selectedPage)
+                dataManager.addWrapperBlock(newBlock, to: pageId)
             } else {
                 let newBlock = WrappedBlock.create(
                     position: position,
@@ -619,17 +693,18 @@ struct AdminView: View {
                     group: blockGroup
                 )
                 
-                dataManager.addWrappedBlock(newBlock, to: selectedPage)
+                dataManager.addWrappedBlock(newBlock, to: pageId)
             }
             
             addedCount += 1
         }
         
         // 結果表示
+        let pageName = selectedPage?.name ?? "選択されたページ"
         if errorCount > 0 {
-            showAlert(message: "\(addedCount)個のブロックを追加しました\n\(errorCount)行でエラーが発生しました")
+            showAlert(message: "\(addedCount)個のブロックを\(pageName)に追加しました\n\(errorCount)行でエラーが発生しました")
         } else {
-            showAlert(message: "\(addedCount)個の\(selectedBlockType.rawValue)を\(selectedPage.rawValue)に追加しました")
+            showAlert(message: "\(addedCount)個の\(selectedBlockType.rawValue)を\(pageName)に追加しました")
         }
         
         // フォームをクリア
@@ -638,14 +713,19 @@ struct AdminView: View {
     
     // MARK: - ブロック追加処理
     private func addBlock() {
+        guard let pageId = selectedPageId else {
+            showAlert(message: "ページを選択してください")
+            return
+        }
+        
         if selectedBlockType == .wrapper {
-            addWrapperBlock()
+            addWrapperBlock(to: pageId)
         } else {
-            addWrappedBlock()
+            addWrappedBlock(to: pageId)
         }
     }
     
-    private func addWrapperBlock() {
+    private func addWrapperBlock(to pageId: UUID) {
         // 入力検証
         guard !wrapperText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             showAlert(message: "表面テキストを入力してください")
@@ -671,15 +751,16 @@ struct AdminView: View {
         )
         
         // DataManagerを使用してブロックを追加
-        dataManager.addWrapperBlock(newBlock, to: selectedPage)
+        dataManager.addWrapperBlock(newBlock, to: pageId)
         
         // フォームをクリア
         clearWrapperForm()
         
-        showAlert(message: "WrapperBlockを\(selectedPage.rawValue)に追加しました")
+        let pageName = selectedPage?.name ?? "選択されたページ"
+        showAlert(message: "WrapperBlockを\(pageName)に追加しました")
     }
     
-    private func addWrappedBlock() {
+    private func addWrappedBlock(to pageId: UUID) {
         // 入力検証
         guard !wrappedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             showAlert(message: "表面テキストを入力してください")
@@ -705,12 +786,13 @@ struct AdminView: View {
         )
         
         // DataManagerを使用してブロックを追加
-        dataManager.addWrappedBlock(newBlock, to: selectedPage)
+        dataManager.addWrappedBlock(newBlock, to: pageId)
         
         // フォームをクリア
         clearWrappedForm()
         
-        showAlert(message: "WrappedBlockを\(selectedPage.rawValue)に追加しました")
+        let pageName = selectedPage?.name ?? "選択されたページ"
+        showAlert(message: "WrappedBlockを\(pageName)に追加しました")
     }
     
     // MARK: - ヘルパー関数
